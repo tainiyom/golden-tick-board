@@ -1,6 +1,6 @@
 (() => {
   /* ===== ตั้งค่า: วาง Web app URL จาก Apps Script ตรงนี้ ===== */
-  const API_URL = "PASTE_YOUR_WEB_APP_URL_HERE";
+  const API_URL = "https://script.google.com/macros/s/AKfycbwL_0SBo_I36BvAIZJ1wcDLUiwGQFPDqWcC_YbSX7tMmq2xE-Qzf7s5K5TvNdm4nfnDyA/exec";
   const POLL = 60000; // ดึงข้อมูลใหม่ทุก 1 นาที
 
   const $ = s => document.querySelector(s);
