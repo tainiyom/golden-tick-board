@@ -1,6 +1,8 @@
 (() => {
   /* ===== ตั้งค่า: วาง Web app URL จาก Apps Script ตรงนี้ ===== */
   const API_URL = "https://script.google.com/macros/s/AKfycbwL_0SBo_I36BvAIZJ1wcDLUiwGQFPDqWcC_YbSX7tMmq2xE-Qzf7s5K5TvNdm4nfnDyA/exec";
+  // ตัดช่องว่างและอักขระที่มองไม่เห็นซึ่งอาจติดมาตอนคัดลอกวาง
+  const BASE_URL = API_URL.replace(/[\s\u00A0\u200B-\u200D\u2060\uFEFF]/g, "");
   const POLL = 60000; // ดึงข้อมูลใหม่ทุก 1 นาที
 
   const $ = s => document.querySelector(s);
@@ -19,10 +21,8 @@
   const savePrefs = () => { try { localStorage.setItem("gtb-prefs", JSON.stringify({ owner: state.owner, group: state.group, sort: state.sort })); } catch {} };
 
   async function api(params) {
-    const u = new URL(API_URL);
-    Object.entries(params || {}).forEach(([k, v]) => u.searchParams.set(k, v));
-    u.searchParams.set("t", Date.now()); // กันเบราว์เซอร์แคช
-    const r = await fetch(u.toString());
+    const qs = new URLSearchParams(Object.assign({}, params, { t: Date.now() })).toString(); // t กันเบราว์เซอร์แคช
+    const r = await fetch(BASE_URL + (BASE_URL.includes("?") ? "&" : "?") + qs);
     if (!r.ok) throw new Error("HTTP " + r.status);
     const j = await r.json();
     if (j.error) throw new Error(j.error);
@@ -272,7 +272,7 @@
 
   /* ---------- start ---------- */
   renderChrome(); renderGrid();
-  if (!/^https:\/\/script\.google\.com\//.test(API_URL)) {
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(BASE_URL)) {
     $("#status").innerHTML = `<div class="notice"><p>ยังไม่ได้ตั้งค่า API_URL ใน app.js ให้วาง Web app URL จาก Google Apps Script (ดูขั้นตอนใน README.md)</p></div>`;
     $("#grid").innerHTML = ""; setStamp("ยังไม่ได้ตั้งค่า", false);
     return;
