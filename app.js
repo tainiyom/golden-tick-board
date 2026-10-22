@@ -3,7 +3,7 @@
   const API_URL = "https://script.google.com/macros/s/AKfycbwL_0SBo_I36BvAIZJ1wcDLUiwGQFPDqWcC_YbSX7tMmq2xE-Qzf7s5K5TvNdm4nfnDyA/exec";
   // ตัดช่องว่างและอักขระที่มองไม่เห็นซึ่งอาจติดมาตอนคัดลอกวาง
   const BASE_URL = API_URL.replace(/[\s\u00A0\u200B-\u200D\u2060\uFEFF]/g, "");
-  const POLL = 60000; // ดึงข้อมูลใหม่ทุก 1 นาที
+  const POLL = 20000; // ดึงข้อมูลใหม่ทุก 20 วินาทีขณะเปิดหน้าอยู่
 
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -155,22 +155,32 @@
   function setStamp(text, live) { $("#stamp").innerHTML = `<span class="dot ${live ? "live" : ""}"></span>${esc(text)}`; }
 
   /* ---------- data ---------- */
-  async function loadOverview() {
+  let busy = false, lastOk = 0, lastTry = 0, sheetAt = 0;
+  function tickStamp() {
+    if (!lastOk) return;
+    const sec = Math.max(0, Math.round((Date.now() - lastOk) / 1000));
+    const ago = sec < 10 ? "เมื่อสักครู่" : sec < 60 ? `${sec} วินาทีที่แล้ว` : `${Math.floor(sec / 60)} นาทีที่แล้ว`;
+    const t = new Date(sheetAt || lastOk).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    setStamp(`ข้อมูลชีต ${t} · เช็กล่าสุด${ago === "เมื่อสักครู่" ? "" : " "}${ago}`, Date.now() - lastOk < POLL * 3);
+  }
+  async function loadOverview(force) {
+    if (busy) return;
+    if (!force && Date.now() - lastTry < 3000) return; // กันยิงซ้ำตอนสลับแอปไปมา
+    busy = true; lastTry = Date.now();
     try {
-      const d = await api();
+      const d = await api(force ? { fresh: 1 } : {});
       const ch = parseTracker(d.tracker || [], d.fileIds || []);
       state.summary = parseSummary(d.summary);
       if (ch.length) { state.channels = ch; state.loaded = true; }
       $("#status").innerHTML = "";
-      const t = new Date(d.updatedAt || Date.now()).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
-      setStamp(`อัปเดตล่าสุด ${t} · ดึงใหม่ทุก 1 นาที`, true);
+      lastOk = Date.now(); sheetAt = d.updatedAt ? Date.parse(d.updatedAt) : lastOk; tickStamp();
       renderChrome(); renderGrid();
       if (state.detail) { const c = ch.find(x => x.no === state.detail.no); if (c) { state.detail = c; renderDrawerHead(); } }
     } catch (e) {
       if (state.loaded) { setStamp("ดึงข้อมูลล่าสุดไม่สำเร็จ แสดงข้อมูลเดิมอยู่", false); return; }
       $("#status").innerHTML = `<div class="notice err"><p>ดึงข้อมูลจากชีตไม่สำเร็จ (${esc(e.message)}) ตรวจว่า Web app ของ Apps Script ตั้งสิทธิ์เป็น Anyone และ URL ใน app.js ถูกต้อง</p></div>`;
       $("#grid").innerHTML = ""; setStamp("ไม่ได้เชื่อมต่อ", false);
-    }
+    } finally { busy = false; }
   }
 
   /* ---------- drawer ---------- */
@@ -230,15 +240,18 @@
     }).join("") + `</div>`;
   }
 
-  async function loadDetail() {
-    const c = state.detail; if (!c) return;
+  let detailBusy = false;
+  async function loadDetail(force) {
+    const c = state.detail; if (!c || detailBusy) return;
     if (!c.fileId) { detailData.err = "ไม่พบลิงก์ไฟล์ช่องในคอลัมน์ ไฟล์ช่อง"; renderDrawerBody(); return; }
+    detailBusy = true;
     try {
-      const d = await api({ channel: c.fileId });
+      const d = await api(force ? { channel: c.fileId, fresh: 1 } : { channel: c.fileId });
       if (state.detail?.no !== c.no) return;
       detailData.clips = d.clips || []; detailData.queue = d.queue || []; detailData.err = null;
     } catch (e) { if (!detailData.clips) detailData.err = e.message; }
-    renderDrawerBody();
+    finally { detailBusy = false; }
+    if (state.detail?.no === c.no) renderDrawerBody();
   }
   function openDetail(no) {
     const c = state.channels.find(x => x.no === no); if (!c) return;
@@ -263,7 +276,7 @@
       setTimeout(() => cp.textContent = "คัดลอก", 1600);
     }
   });
-  $("#refresh").addEventListener("click", () => { setStamp("กำลังดึงข้อมูล…", false); loadOverview(); if (state.detail) loadDetail(); });
+  $("#refresh").addEventListener("click", () => { setStamp("กำลังดึงข้อมูล…", false); loadOverview(true); if (state.detail) loadDetail(true); });
   $("#q").addEventListener("input", e => { state.q = e.target.value.trim(); renderGrid(); });
   $("#sort").addEventListener("change", e => { state.sort = e.target.value; savePrefs(); renderGrid(); });
   $("#dClose").addEventListener("click", closeDetail);
@@ -277,7 +290,13 @@
     $("#grid").innerHTML = ""; setStamp("ยังไม่ได้ตั้งค่า", false);
     return;
   }
-  loadOverview();
-  setInterval(() => { if (document.hidden) return; loadOverview(); if (state.detail) loadDetail(); }, POLL);
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadOverview(); });
+  const catchUp = () => { if (document.hidden) return; loadOverview(); if (state.detail) loadDetail(); };
+  loadOverview(true);
+  setInterval(catchUp, POLL);
+  setInterval(tickStamp, 5000);
+  // มือถือหยุดหน้าเว็บตอนสลับแอปหรือล็อกจอ กลับมาเมื่อไรให้ดึงข้อมูลใหม่ทันที
+  document.addEventListener("visibilitychange", catchUp);
+  window.addEventListener("pageshow", catchUp);
+  window.addEventListener("focus", catchUp);
+  window.addEventListener("online", catchUp);
 })();
